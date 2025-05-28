@@ -1,0 +1,53 @@
+<!-- netlify-link-check.html -- Start of Netlify Link Test -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test HiveTag Redirect</title>
+  <style>
+    body { font-family: sans-serif; padding: 2em; }
+    label, input, button { display: block; margin: 1em 0; }
+    pre { background: #f4f4f4; padding: 1em; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h1>Test HiveTag Redirect Function</h1>
+
+  <label for="lat">Latitude:</label>
+  <input type="text" id="lat" value="51.409" />
+
+  <label for="lon">Longitude:</label>
+  <input type="text" id="lon" value="-3.280" />
+
+  <button onclick="testRedirect()">Test Redirect Function</button>
+
+  <h2>Response</h2>
+  <pre id="output">No request made yet.</pre>
+  <div id="link"></div>
+
+  <script>
+    async function testRedirect() {
+      const lat = document.getElementById("lat").value;
+      const lon = document.getElementById("lon").value;
+      const url = `https://hivetag-netlify.netlify.app/.netlify/functions/hivetag-redirect?lat=${lat}&lon=${lon}`;
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+
+        if (data.redirectUrl) {
+          document.getElementById("link").innerHTML = `<p><a href="${data.redirectUrl}" target="_blank">Open Prefilled Form</a></p>`;
+        } else {
+          document.getElementById("link").textContent = "No redirectUrl returned.";
+        }
+      } catch (err) {
+        document.getElementById("output").textContent = "Error: " + err.message;
+        document.getElementById("link").textContent = "";
+      }
+    }
+  </script>
+</body>
+</html>
+<!-- netlify-link-check.html -- End -->
