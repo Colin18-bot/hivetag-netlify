@@ -74,3 +74,14 @@ exports.handler = async function (event, context) {
       const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
 
       // ✅ Log each row's lat/lon and distance to termi
+
+
+    };
+  } catch (error) {
+    console.error("Redirect error:", error);
+    return {
+      statusCode: 500,
+      body: "Server error",
+    };
+  }
+}; // <--- This closing brace and semicolon was missing
