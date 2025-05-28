@@ -17,8 +17,8 @@ exports.handler = async function (event, context) {
       auth: process.env.GOOGLE_API_KEY,
     });
 
-    const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs"; // your sheet ID
-    const range = "Form Responses 1"; // adjust if needed
+    const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
+    const range = "Form Responses 1";
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
@@ -73,37 +73,4 @@ exports.handler = async function (event, context) {
 
       const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
 
-      if (d < closestDistance) {
-        closestDistance = d;
-        closest = row;
-      }
-    }
-
-    if (!closest) {
-      return {
-        statusCode: 404,
-        body: "No hive matched within 100m",
-      };
-    }
-
-    const hiveId = closest[hiveIdIndex];
-    const apiary = closest[apiaryIndex];
-
-    const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(
-      hiveId
-    )}&entry.275862362=${encodeURIComponent(apiary)}`;
-
-    return {
-      statusCode: 302,
-      headers: {
-        Location: formUrl,
-      },
-    };
-  } catch (error) {
-    console.error("Redirect error:", error);
-    return {
-      statusCode: 500,
-      body: "Server error",
-    };
-  }
-};
+      // ✅ Log each row's lat/lon and distance to termi
