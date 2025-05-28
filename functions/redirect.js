@@ -1,100 +1,109 @@
-const { google } = require('googleapis');
-const fetch = require('node-fetch');
+const { google } = require("googleapis");
+const fetch = require("node-fetch");
 
-const SHEET_ID = '11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs';
-const SHEET_RANGE = 'Form Responses 1';
-const API_KEY = process.env.GOOGLE_API_KEY;
-
-const DEFAULT_RADIUS_METERS = 100;
-
-function getDistanceMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const toRad = deg => deg * (Math.PI / 180);
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function findNearestHive(currentLat, currentLon, hiveList, radius = DEFAULT_RADIUS_METERS) {
-  return hiveList.find(hive => {
-    const { latitude, longitude } = hive;
-    if (!latitude || !longitude) return false;
-    const distance = getDistanceMeters(currentLat, currentLon, parseFloat(latitude), parseFloat(longitude));
-    return distance <= radius;
-  });
-}
-
-exports.handler = async function (event) {
+exports.handler = async function (event, context) {
   try {
-    const urlParams = new URLSearchParams(event.queryStringParameters);
-    const lat = parseFloat(urlParams.get('lat'));
-    const lon = parseFloat(urlParams.get('lon'));
+    const { lat, lon } = event.queryStringParameters;
 
     if (!lat || !lon) {
       return {
         statusCode: 400,
-        body: 'Missing GPS coordinates',
+        body: "Missing lat or lon",
       };
     }
 
-    const sheets = google.sheets({ version: 'v4', auth: API_KEY });
-    const sheetData = await sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID,
-      range: SHEET_RANGE,
+    const sheets = google.sheets({
+      version: "v4",
+      auth: process.env.GOOGLE_API_KEY,
     });
 
-    const rows = sheetData.data.values;
+    const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs"; // your sheet ID
+    const range = "Form Responses 1"; // adjust if needed
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range,
+    });
+
+    const rows = response.data.values;
+
     if (!rows || rows.length < 2) {
       return {
-        statusCode: 404,
-        body: 'No hive data found',
+        statusCode: 500,
+        body: "No data found",
       };
     }
 
     const headers = rows[0];
-    const hiveList = rows.slice(1).map(row => {
-      const obj = {};
-      headers.forEach((key, i) => {
-        obj[key.trim()] = row[i] || '';
-      });
-      return {
-        hiveId: obj['Hive ID'],
-        latitude: obj['Latitude'],
-        longitude: obj['Longitude'],
-        apiary: obj['Apiary Name'],
-      };
-    });
+    const dataRows = rows.slice(1);
 
-    const match = findNearestHive(lat, lon, hiveList);
+    const latIndex = headers.indexOf("Latitude");
+    const lonIndex = headers.indexOf("Longitude");
+    const hiveIdIndex = headers.indexOf("Hive ID");
+    const apiaryIndex = headers.indexOf("Apiary");
 
-    if (!match) {
+    if (latIndex === -1 || lonIndex === -1 || hiveIdIndex === -1 || apiaryIndex === -1) {
       return {
-        statusCode: 404,
-        body: 'No hive matched within 100m',
+        statusCode: 500,
+        body: "Missing expected columns",
       };
     }
 
-    const formUrl = new URL('https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform');
-    formUrl.searchParams.append('entry.432611212', match.hiveId);   // Hive ID
-    formUrl.searchParams.append('entry.275862362', match.apiary);   // Apiary
+    const toRadians = (deg) => (deg * Math.PI) / 180;
+    const distanceMeters = (lat1, lon1, lat2, lon2) => {
+      const R = 6371000;
+      const dLat = toRadians(lat2 - lat1);
+      const dLon = toRadians(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRadians(lat1)) *
+          Math.cos(toRadians(lat2)) *
+          Math.sin(dLon / 2) ** 2;
+      return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+    };
+
+    let closest = null;
+    let closestDistance = 100; // meters
+
+    for (const row of dataRows) {
+      const rowLat = parseFloat(row[latIndex]);
+      const rowLon = parseFloat(row[lonIndex]);
+
+      if (isNaN(rowLat) || isNaN(rowLon)) continue;
+
+      const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
+
+      if (d < closestDistance) {
+        closestDistance = d;
+        closest = row;
+      }
+    }
+
+    if (!closest) {
+      return {
+        statusCode: 404,
+        body: "No hive matched within 100m",
+      };
+    }
+
+    const hiveId = closest[hiveIdIndex];
+    const apiary = closest[apiaryIndex];
+
+    const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(
+      hiveId
+    )}&entry.275862362=${encodeURIComponent(apiary)}`;
 
     return {
       statusCode: 302,
       headers: {
-        Location: formUrl.toString(),
+        Location: formUrl,
       },
-      body: '',
     };
-  } catch (err) {
-    console.error('Redirect error:', err);
+  } catch (error) {
+    console.error("Redirect error:", error);
     return {
       statusCode: 500,
-      body: 'Server error',
+      body: "Server error",
     };
   }
 };
