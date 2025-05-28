@@ -1,48 +1,100 @@
-// /netlify/functions/hivetag-redirect.js
+const { google } = require('googleapis');
+const fetch = require('node-fetch');
 
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+const SHEET_ID = '11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs'; // HiveTag Registration Sheet
+const SHEET_RANGE = 'Form Responses 1';
+const API_KEY = process.env.GOOGLE_API_KEY;
 
-// Weather API key (already embedded)
-const WEATHER_API_KEY = "01e79aef041646c8bbf182847252805";
+const DEFAULT_RADIUS_METERS = 100;
 
-// Google Form prefill base
-const FORM_BASE_URL = "https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform";
-const ENTRY_HIVE_ID = "entry.432611212";
-const ENTRY_APIARY = "entry.275862362";
-const ENTRY_WEATHER = "entry.2060880531";
-
-function buildPrefillUrl(hive, apiary, weather) {
-  const params = new URLSearchParams();
-  if (hive) params.append(ENTRY_HIVE_ID, hive);
-  if (apiary) params.append(ENTRY_APIARY, apiary);
-  if (weather) params.append(ENTRY_WEATHER, weather);
-
-  return `${FORM_BASE_URL}?usp=pp_url&${params.toString()}`;
+function getDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = deg => deg * (Math.PI / 180);
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
-exports.handler = async (event) => {
+function findNearestHive(currentLat, currentLon, hiveList, radius = DEFAULT_RADIUS_METERS) {
+  return hiveList.find(hive => {
+    const { latitude, longitude } = hive;
+    if (!latitude || !longitude) return false;
+    const distance = getDistanceMeters(currentLat, currentLon, parseFloat(latitude), parseFloat(longitude));
+    return distance <= radius;
+  });
+}
+
+exports.handler = async function (event) {
   try {
-    const { hive = "", apiary = "", lat = "", lon = "" } = event.queryStringParameters;
+    const urlParams = new URLSearchParams(event.queryStringParameters);
+    const lat = parseFloat(urlParams.get('lat'));
+    const lon = parseFloat(urlParams.get('lon'));
 
-    let weather = "";
-
-    if (lat && lon) {
-      const weatherUrl = `https://api.weatherapi.com/v1/current.json?key=${WEATHER_API_KEY}&q=${lat},${lon}`;
-      const response = await fetch(weatherUrl);
-      const data = await response.json();
-      weather = data.current?.condition?.text || "";
+    if (!lat || !lon) {
+      return {
+        statusCode: 400,
+        body: 'Missing GPS coordinates',
+      };
     }
 
-    const url = buildPrefillUrl(hive, apiary, weather);
+    const sheets = google.sheets({ version: 'v4', auth: API_KEY });
+    const sheetData = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: SHEET_RANGE,
+    });
+
+    const rows = sheetData.data.values;
+    if (!rows || rows.length < 2) {
+      return {
+        statusCode: 404,
+        body: 'No hive data found',
+      };
+    }
+
+    const headers = rows[0];
+    const hiveList = rows.slice(1).map(row => {
+      const obj = {};
+      headers.forEach((key, i) => {
+        obj[key.trim()] = row[i] || '';
+      });
+      return {
+        hiveId: obj['Hive ID'],
+        latitude: obj['Latitude'],
+        longitude: obj['Longitude'],
+        apiary: obj['Apiary Name'],
+      };
+    });
+
+    const match = findNearestHive(lat, lon, hiveList);
+
+    if (!match) {
+      return {
+        statusCode: 404,
+        body: 'No matching hive found within GPS radius.',
+      };
+    }
+
+    const formUrl = new URL('https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform');
+    formUrl.searchParams.append('entry.432611212', match.hiveId);   // Hive ID
+    formUrl.searchParams.append('entry.275862362', match.apiary);   // Apiary
 
     return {
-      statusCode: 200,
-      body: JSON.stringify({ url })
+      statusCode: 302,
+      headers: {
+        Location: formUrl.toString(),
+      },
+      body: '',
     };
   } catch (err) {
+    console.error('Redirect error:', err);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: err.message })
+      body: 'Server error',
     };
   }
 };
