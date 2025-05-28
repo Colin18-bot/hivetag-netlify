@@ -1,6 +1,6 @@
 // /netlify/functions/hivetag-redirect.js
 
-const fetch = require("node-fetch");
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 // Weather API key (already embedded)
 const WEATHER_API_KEY = "01e79aef041646c8bbf182847252805";
