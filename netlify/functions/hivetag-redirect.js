@@ -1,10 +1,11 @@
 const { google } = require('googleapis');
 const fetch = require('node-fetch');
 
-const SHEET_ID = '11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs'; // HiveTag Registration Sheet
+const SHEET_ID = '11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs';
 const SHEET_RANGE = 'Form Responses 1';
 const API_KEY = process.env.GOOGLE_API_KEY;
 
+// === GPS Matching Logic ===
 const DEFAULT_RADIUS_METERS = 100;
 
 function getDistanceMeters(lat1, lon1, lat2, lon2) {
@@ -29,6 +30,7 @@ function findNearestHive(currentLat, currentLon, hiveList, radius = DEFAULT_RADI
   });
 }
 
+// === Redirect Function ===
 exports.handler = async function (event) {
   try {
     const urlParams = new URLSearchParams(event.queryStringParameters);
@@ -75,7 +77,7 @@ exports.handler = async function (event) {
     if (!match) {
       return {
         statusCode: 404,
-        body: 'No matching hive found within GPS radius.',
+        body: 'No matching hive found within 100m GPS radius.',
       };
     }
 
