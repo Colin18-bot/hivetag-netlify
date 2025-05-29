@@ -1,3 +1,4 @@
+
 // Field-Ready Dynamic Hive Redirect Function
 const { google } = require("googleapis");
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
@@ -108,4 +109,3 @@ exports.handler = async function (event, context) {
     return { statusCode: 500, body: "Server error" };
   }
 };
-
