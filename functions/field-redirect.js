@@ -1,4 +1,4 @@
-// Field-Ready Dynamic Hive Redirect Function
+// Field-Ready Dynamic Hive Redirect Function with Weather Fallback Reason Logging
 const { google } = require("googleapis");
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
@@ -14,27 +14,10 @@ exports.handler = async function (event, context) {
     }
 
     let weather = "Unknown";
+    let latForWeather = lat;
+    let lonForWeather = lon;
+    let fallbackNote = "";
 
-    // 🌦️ Step 1: Weather lookup (only if lat/lon provided and valid)
-    if (lat && lon && lat !== "0" && lon !== "0") {
-      try {
-        const weatherRes = await fetch(
-          `https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`
-        );
-        const weatherData = await weatherRes.json();
-        console.log("🌦️ Weather response:", weatherData);
-
-        if (weatherData && weatherData.current?.condition?.text) {
-          weather = weatherData.current.condition.text;
-        } else if (weatherData.error) {
-          console.warn("⚠️ Weather API Error:", weatherData.error.message);
-        }
-      } catch (err) {
-        console.warn("Weather lookup failed:", err.message);
-      }
-    }
-
-    // 📊 Step 2: Sheet lookup
     const sheets = google.sheets({ version: "v4", auth: process.env.GOOGLE_API_KEY });
     const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
     const range = "Form Responses 1";
@@ -78,7 +61,6 @@ exports.handler = async function (event, context) {
       }
     }
 
-    // 🧭 Improved fallback to Hive ID + Apiary Name match
     if (!closest && hiveId && apiaryNameParam) {
       const hiveMatches = dataRows.filter(
         r => r[hiveIdIndex] === hiveId && r[apiaryIndex] === apiaryNameParam
@@ -88,6 +70,38 @@ exports.handler = async function (event, context) {
       } else if (hiveMatches.length > 1) {
         closest = hiveMatches.find(r => r[latIndex] && r[lonIndex]);
       }
+
+      if (closest && (!closest[latIndex] || !closest[lonIndex]) && lat && lon) {
+        latForWeather = lat;
+        lonForWeather = lon;
+        fallbackNote = "Using provided lat/lon due to missing fallback GPS.";
+      } else if (closest && closest[latIndex] && closest[lonIndex]) {
+        latForWeather = closest[latIndex].trim();
+        lonForWeather = closest[lonIndex].trim();
+        fallbackNote = "Using lat/lon from matched hive row.";
+      } else {
+        fallbackNote = "No valid lat/lon available for weather lookup.";
+      }
+    }
+
+    if (latForWeather && lonForWeather && latForWeather !== "0" && lonForWeather !== "0") {
+      try {
+        const weatherRes = await fetch(
+          `https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${latForWeather},${lonForWeather}`
+        );
+        const weatherData = await weatherRes.json();
+        console.log("🌦️ Weather response:", weatherData);
+
+        if (weatherData && weatherData.current?.condition?.text) {
+          weather = weatherData.current.condition.text;
+        } else if (weatherData.error) {
+          fallbackNote += ` Weather API error: ${weatherData.error.message}`;
+        }
+      } catch (err) {
+        fallbackNote += ` Weather fetch failed: ${err.message}`;
+      }
+    } else {
+      fallbackNote += " No valid GPS for weather lookup.";
     }
 
     if (!closest) {
@@ -97,7 +111,7 @@ exports.handler = async function (event, context) {
     const matchedHiveId = closest[hiveIdIndex];
     const apiary = closest[apiaryIndex];
 
-    const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(matchedHiveId)}&entry.275862362=${encodeURIComponent(apiary)}&entry.2060880531=${encodeURIComponent(weather)}`;
+    const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(matchedHiveId)}&entry.275862362=${encodeURIComponent(apiary)}&entry.2060880531=${encodeURIComponent(weather)}&entry.1234567890=${encodeURIComponent(fallbackNote)}`;
 
     return {
       statusCode: 302,
