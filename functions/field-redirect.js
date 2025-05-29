@@ -108,3 +108,4 @@ exports.handler = async function (event, context) {
     return { statusCode: 500, body: "Server error" };
   }
 };
+
