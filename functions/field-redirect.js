@@ -1,4 +1,4 @@
-// Field-Ready Dynamic Hive Redirect Function with Weather Fallback Reason Logging + GPS Auto-Fill
+// Field-Ready Dynamic Hive Redirect Function with Enhanced Fallback Priority and Weather Logging
 const { google } = require("googleapis");
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
@@ -58,7 +58,7 @@ exports.handler = async function (event, context) {
         if (d < closestDistance) {
           closestDistance = d;
           closest = row;
-          closestRowIndex = i + 1; // +1 to adjust for headers
+          closestRowIndex = i + 1;
         }
       });
     }
@@ -71,7 +71,8 @@ exports.handler = async function (event, context) {
         closest = hiveMatches[0];
         closestRowIndex = dataRows.indexOf(closest) + 1;
       } else if (hiveMatches.length > 1) {
-        closest = hiveMatches.find(r => r[latIndex] && r[lonIndex]);
+        const gpsMissing = hiveMatches.find(r => !r[latIndex] || !r[lonIndex]);
+        closest = gpsMissing || hiveMatches.find(r => r[latIndex] && r[lonIndex]);
         closestRowIndex = dataRows.indexOf(closest) + 1;
       }
     }
@@ -83,7 +84,6 @@ exports.handler = async function (event, context) {
     const matchedHiveId = closest[hiveIdIndex];
     const apiary = closest[apiaryIndex];
 
-    // Auto-fill GPS if missing
     if (lat && lon && lat !== "0" && lon !== "0") {
       const recordedLat = closest[latIndex]?.trim();
       const recordedLon = closest[lonIndex]?.trim();
