@@ -1,4 +1,4 @@
-// Field-Ready Dynamic Hive Redirect Function with Weather Fallback Reason Logging
+// Field-Ready Dynamic Hive Redirect Function with Weather Fallback Reason Logging + GPS Auto-Fill
 const { google } = require("googleapis");
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
@@ -37,6 +37,7 @@ exports.handler = async function (event, context) {
 
     let closest = null;
     let closestDistance = 100;
+    let closestRowIndex = -1;
     const toRadians = (deg) => (deg * Math.PI) / 180;
     const distanceMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371000;
@@ -48,17 +49,18 @@ exports.handler = async function (event, context) {
     };
 
     if (lat && lon && lat !== "0" && lon !== "0") {
-      for (const row of dataRows) {
+      dataRows.forEach((row, i) => {
         const rowLat = parseFloat(row[latIndex]);
         const rowLon = parseFloat(row[lonIndex]);
-        if (isNaN(rowLat) || isNaN(rowLon)) continue;
+        if (isNaN(rowLat) || isNaN(rowLon)) return;
 
         const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
         if (d < closestDistance) {
           closestDistance = d;
           closest = row;
+          closestRowIndex = i + 1; // +1 to adjust for headers
         }
-      }
+      });
     }
 
     if (!closest && hiveId && apiaryNameParam) {
@@ -67,21 +69,47 @@ exports.handler = async function (event, context) {
       );
       if (hiveMatches.length === 1) {
         closest = hiveMatches[0];
+        closestRowIndex = dataRows.indexOf(closest) + 1;
       } else if (hiveMatches.length > 1) {
         closest = hiveMatches.find(r => r[latIndex] && r[lonIndex]);
+        closestRowIndex = dataRows.indexOf(closest) + 1;
       }
+    }
 
-      if (closest && (!closest[latIndex] || !closest[lonIndex]) && lat && lon) {
-        latForWeather = lat;
-        lonForWeather = lon;
-        fallbackNote = "Using provided lat/lon due to missing fallback GPS.";
-      } else if (closest && closest[latIndex] && closest[lonIndex]) {
-        latForWeather = closest[latIndex].trim();
-        lonForWeather = closest[lonIndex].trim();
-        fallbackNote = "Using lat/lon from matched hive row.";
-      } else {
-        fallbackNote = "No valid lat/lon available for weather lookup.";
+    if (!closest) {
+      return { statusCode: 404, body: "No hive matched within 100m or valid fallback by Hive ID and Apiary Name" };
+    }
+
+    const matchedHiveId = closest[hiveIdIndex];
+    const apiary = closest[apiaryIndex];
+
+    // Auto-fill GPS if missing
+    if (lat && lon && lat !== "0" && lon !== "0") {
+      const recordedLat = closest[latIndex]?.trim();
+      const recordedLon = closest[lonIndex]?.trim();
+      const isMissingGPS = !recordedLat || !recordedLon || isNaN(recordedLat) || isNaN(recordedLon);
+
+      if (isMissingGPS && closestRowIndex !== -1) {
+        const updateRange = `Form Responses 1!${String.fromCharCode(65 + latIndex)}${closestRowIndex + 1}:${String.fromCharCode(65 + lonIndex)}${closestRowIndex + 1}`;
+        await sheets.spreadsheets.values.update({
+          spreadsheetId,
+          range: updateRange,
+          valueInputOption: "RAW",
+          requestBody: { values: [[lat, lon]] },
+        });
       }
+    }
+
+    if (closest[latIndex] && closest[lonIndex]) {
+      latForWeather = closest[latIndex].trim();
+      lonForWeather = closest[lonIndex].trim();
+      fallbackNote = "Using lat/lon from matched hive row.";
+    } else if (lat && lon) {
+      latForWeather = lat;
+      lonForWeather = lon;
+      fallbackNote = "Using provided lat/lon due to missing fallback GPS.";
+    } else {
+      fallbackNote = "No valid lat/lon available for weather lookup.";
     }
 
     if (latForWeather && lonForWeather && latForWeather !== "0" && lonForWeather !== "0") {
@@ -90,8 +118,6 @@ exports.handler = async function (event, context) {
           `https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${latForWeather},${lonForWeather}`
         );
         const weatherData = await weatherRes.json();
-        console.log("🌦️ Weather response:", weatherData);
-
         if (weatherData && weatherData.current?.condition?.text) {
           weather = weatherData.current.condition.text;
         } else if (weatherData.error) {
@@ -103,13 +129,6 @@ exports.handler = async function (event, context) {
     } else {
       fallbackNote += " No valid GPS for weather lookup.";
     }
-
-    if (!closest) {
-      return { statusCode: 404, body: "No hive matched within 100m or valid fallback by Hive ID and Apiary Name" };
-    }
-
-    const matchedHiveId = closest[hiveIdIndex];
-    const apiary = closest[apiaryIndex];
 
     const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(matchedHiveId)}&entry.275862362=${encodeURIComponent(apiary)}&entry.2060880531=${encodeURIComponent(weather)}&entry.1234567890=${encodeURIComponent(fallbackNote)}`;
 
