@@ -4,7 +4,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 
 exports.handler = async function (event, context) {
   try {
-    const { lat, lon, hiveId } = event.queryStringParameters;
+    const { lat, lon, hiveId, apiaryName: apiaryNameParam } = event.queryStringParameters;
 
     if ((!lat || !lon) && !hiveId) {
       return {
@@ -78,9 +78,11 @@ exports.handler = async function (event, context) {
       }
     }
 
-    // 🧭 Improved fallback to Hive ID: match hiveId, then prefer entry with valid GPS
-    if (!closest && hiveId) {
-      const hiveMatches = dataRows.filter(r => r[hiveIdIndex] === hiveId);
+    // 🧭 Improved fallback to Hive ID + Apiary Name match
+    if (!closest && hiveId && apiaryNameParam) {
+      const hiveMatches = dataRows.filter(
+        r => r[hiveIdIndex] === hiveId && r[apiaryIndex] === apiaryNameParam
+      );
       if (hiveMatches.length === 1) {
         closest = hiveMatches[0];
       } else if (hiveMatches.length > 1) {
@@ -89,7 +91,7 @@ exports.handler = async function (event, context) {
     }
 
     if (!closest) {
-      return { statusCode: 404, body: "No hive matched within 100m or valid fallback by Hive ID" };
+      return { statusCode: 404, body: "No hive matched within 100m or valid fallback by Hive ID and Apiary Name" };
     }
 
     const matchedHiveId = closest[hiveIdIndex];
