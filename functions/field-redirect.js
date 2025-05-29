@@ -6,22 +6,29 @@ exports.handler = async function (event, context) {
   try {
     const { lat, lon, hiveId } = event.queryStringParameters;
 
-    if (!lat || !lon) {
+    if ((!lat || !lon) && !hiveId) {
       return {
         statusCode: 400,
-        body: "Missing lat or lon",
+        body: "Missing lat/lon or hiveId",
       };
     }
 
-    // 🌦️ Step 1: Weather lookup
-    const weatherRes = await fetch(
-      `https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`
-    );
-    const weatherData = await weatherRes.json();
-    if (!weatherData || !weatherData.current?.condition) {
-      return { statusCode: 500, body: "Weather lookup failed" };
+    let weather = "Unknown";
+
+    // 🌦️ Step 1: Weather lookup (only if lat/lon provided and valid)
+    if (lat && lon && lat !== "0" && lon !== "0") {
+      try {
+        const weatherRes = await fetch(
+          `https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`
+        );
+        const weatherData = await weatherRes.json();
+        if (weatherData && weatherData.current?.condition?.text) {
+          weather = weatherData.current.condition.text;
+        }
+      } catch (err) {
+        console.warn("Weather lookup failed:", err);
+      }
     }
-    const weather = weatherData.current.condition.text;
 
     // 📊 Step 2: Sheet lookup
     const sheets = google.sheets({ version: "v4", auth: process.env.GOOGLE_API_KEY });
@@ -53,15 +60,17 @@ exports.handler = async function (event, context) {
       return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
     };
 
-    for (const row of dataRows) {
-      const rowLat = parseFloat(row[latIndex]);
-      const rowLon = parseFloat(row[lonIndex]);
-      if (isNaN(rowLat) || isNaN(rowLon)) continue;
+    if (lat && lon && lat !== "0" && lon !== "0") {
+      for (const row of dataRows) {
+        const rowLat = parseFloat(row[latIndex]);
+        const rowLon = parseFloat(row[lonIndex]);
+        if (isNaN(rowLat) || isNaN(rowLon)) continue;
 
-      const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
-      if (d < closestDistance) {
-        closestDistance = d;
-        closest = row;
+        const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
+        if (d < closestDistance) {
+          closestDistance = d;
+          closest = row;
+        }
       }
     }
 
