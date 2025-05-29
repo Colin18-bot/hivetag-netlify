@@ -1,6 +1,6 @@
 // Field-Ready Dynamic Hive Redirect Function
 const { google } = require("googleapis");
-const fetch = require("node-fetch");
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 exports.handler = async function (event, context) {
   try {
@@ -22,7 +22,7 @@ exports.handler = async function (event, context) {
           `https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`
         );
         const weatherData = await weatherRes.json();
-        console.log("🌦️ Weather response:", weatherData); // ✅ Inline logging
+        console.log("🌦️ Weather response:", weatherData);
 
         if (weatherData && weatherData.current?.condition?.text) {
           weather = weatherData.current.condition.text;
