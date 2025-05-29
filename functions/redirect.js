@@ -63,7 +63,7 @@ exports.handler = async function (event, context) {
     };
 
     let closest = null;
-    let closestDistance = 100; // meters
+    let closestDistance = 1000; // ⬅ increased from 100 to 1000 meters
 
     for (const row of dataRows) {
       const rowLat = parseFloat(row[latIndex]);
@@ -82,7 +82,7 @@ exports.handler = async function (event, context) {
     if (!closest) {
       return {
         statusCode: 404,
-        body: "No hive matched within 100m",
+        body: "No hive matched within 1000m",
       };
     }
 
@@ -92,8 +92,6 @@ exports.handler = async function (event, context) {
     const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(
       hiveId
     )}&entry.275862362=${encodeURIComponent(apiary)}`;
-
-    console.log("Redirecting to:", formUrl);
 
     return {
       statusCode: 302,
