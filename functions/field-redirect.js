@@ -1,4 +1,3 @@
-
 // Field-Ready Dynamic Hive Redirect Function
 const { google } = require("googleapis");
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
@@ -79,13 +78,18 @@ exports.handler = async function (event, context) {
       }
     }
 
-    // 🧭 Fallback to Hive ID match if no GPS match
+    // 🧭 Improved fallback to Hive ID: match hiveId, then prefer entry with valid GPS
     if (!closest && hiveId) {
-      closest = dataRows.find((r) => r[hiveIdIndex] === hiveId);
+      const hiveMatches = dataRows.filter(r => r[hiveIdIndex] === hiveId);
+      if (hiveMatches.length === 1) {
+        closest = hiveMatches[0];
+      } else if (hiveMatches.length > 1) {
+        closest = hiveMatches.find(r => r[latIndex] && r[lonIndex]);
+      }
     }
 
     if (!closest) {
-      return { statusCode: 404, body: "No hive matched within 100m or by Hive ID" };
+      return { statusCode: 404, body: "No hive matched within 100m or valid fallback by Hive ID" };
     }
 
     const matchedHiveId = closest[hiveIdIndex];
