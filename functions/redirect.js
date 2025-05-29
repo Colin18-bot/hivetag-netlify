@@ -40,7 +40,7 @@ exports.handler = async function (event, context) {
     const latIndex = headers.indexOf("Latitude");
     const lonIndex = headers.indexOf("Longitude");
     const hiveIdIndex = headers.indexOf("Hive ID");
-    const apiaryIndex = headers.indexOf("Apiary");
+    const apiaryIndex = headers.indexOf("Apiary Name");
 
     if (latIndex === -1 || lonIndex === -1 || hiveIdIndex === -1 || apiaryIndex === -1) {
       return {
@@ -73,9 +73,33 @@ exports.handler = async function (event, context) {
 
       const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
 
-      // ✅ Log each row's lat/lon and distance to termi
+      if (d < closestDistance) {
+        closestDistance = d;
+        closest = row;
+      }
+    }
 
+    if (!closest) {
+      return {
+        statusCode: 404,
+        body: "No hive matched within 100m",
+      };
+    }
 
+    const hiveId = closest[hiveIdIndex];
+    const apiary = closest[apiaryIndex];
+
+    const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(
+      hiveId
+    )}&entry.275862362=${encodeURIComponent(apiary)}`;
+
+    console.log("Redirecting to:", formUrl);
+
+    return {
+      statusCode: 302,
+      headers: {
+        Location: formUrl,
+      },
     };
   } catch (error) {
     console.error("Redirect error:", error);
@@ -84,4 +108,4 @@ exports.handler = async function (event, context) {
       body: "Server error",
     };
   }
-}; // <--- This closing brace and semicolon was missing
+};
