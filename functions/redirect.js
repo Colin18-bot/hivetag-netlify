@@ -12,26 +12,28 @@ exports.handler = async function (event, context) {
       };
     }
 
-    const sheets = google.sheets({
-      version: "v4",
-      auth: process.env.GOOGLE_API_KEY,
-    });
+    // 🌦️ Step 1: Fetch weather data
+    const weatherRes = await fetch(`https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`);
+    const weatherData = await weatherRes.json();
 
+    if (!weatherData || !weatherData.current || !weatherData.current.condition) {
+      return {
+        statusCode: 500,
+        body: "Weather lookup failed",
+      };
+    }
+
+    const weather = weatherData.current.condition.text;
+
+    // 📊 Step 2: Load Google Sheet and locate nearest hive
+    const sheets = google.sheets({ version: "v4", auth: process.env.GOOGLE_API_KEY });
     const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
     const range = "Form Responses 1";
-
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range,
-    });
-
+    const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
     const rows = response.data.values;
 
     if (!rows || rows.length < 2) {
-      return {
-        statusCode: 500,
-        body: "No data found",
-      };
+      return { statusCode: 500, body: "No data found" };
     }
 
     const headers = rows[0];
@@ -43,10 +45,7 @@ exports.handler = async function (event, context) {
     const apiaryIndex = headers.indexOf("Apiary Name");
 
     if (latIndex === -1 || lonIndex === -1 || hiveIdIndex === -1 || apiaryIndex === -1) {
-      return {
-        statusCode: 500,
-        body: "Missing expected columns",
-      };
+      return { statusCode: 500, body: "Missing expected columns" };
     }
 
     const toRadians = (deg) => (deg * Math.PI) / 180;
@@ -54,25 +53,20 @@ exports.handler = async function (event, context) {
       const R = 6371000;
       const dLat = toRadians(lat2 - lat1);
       const dLon = toRadians(lon2 - lon1);
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRadians(lat1)) *
-          Math.cos(toRadians(lat2)) *
-          Math.sin(dLon / 2) ** 2;
+      const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2;
       return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
     };
 
     let closest = null;
-    let closestDistance = 1000; // ⬅ increased from 100 to 1000 meters
+    let closestDistance = 100;
 
     for (const row of dataRows) {
       const rowLat = parseFloat(row[latIndex]);
       const rowLon = parseFloat(row[lonIndex]);
-
       if (isNaN(rowLat) || isNaN(rowLon)) continue;
 
       const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
-
       if (d < closestDistance) {
         closestDistance = d;
         closest = row;
@@ -80,18 +74,13 @@ exports.handler = async function (event, context) {
     }
 
     if (!closest) {
-      return {
-        statusCode: 404,
-        body: "No hive matched within 1000m",
-      };
+      return { statusCode: 404, body: "No hive matched within 100m" };
     }
 
     const hiveId = closest[hiveIdIndex];
     const apiary = closest[apiaryIndex];
 
-    const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(
-      hiveId
-    )}&entry.275862362=${encodeURIComponent(apiary)}`;
+    const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(hiveId)}&entry.275862362=${encodeURIComponent(apiary)}&entry.2060880531=${encodeURIComponent(weather)}`;
 
     return {
       statusCode: 302,
@@ -99,6 +88,7 @@ exports.handler = async function (event, context) {
         Location: formUrl,
       },
     };
+
   } catch (error) {
     console.error("Redirect error:", error);
     return {
