@@ -1,100 +1,74 @@
-const { google } = require('googleapis');
-const fetch = require('node-fetch');
+const fetch = require("node-fetch");
 
-// MAIN HANDLER FUNCTION
+const GOOGLE_SHEET_ID = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
+const SHEET_NAME = "HiveTag - Customer Registration (Responses)";
+const API_KEY = process.env.GOOGLE_API_KEY;
+
 exports.handler = async (event) => {
-  const hiveId = event.queryStringParameters.hive_id;
-  const lat = parseFloat(event.queryStringParameters.lat);
-  const lon = parseFloat(event.queryStringParameters.lon);
+  const { hive_id, lat, lon } = event.queryStringParameters;
 
-  if (!hiveId || isNaN(lat) || isNaN(lon)) {
+  if (!hive_id) {
     return {
       statusCode: 400,
-      body: 'Missing hive_id, lat, or lon',
+      body: "Missing hive_id",
     };
   }
 
-  // ✅ Google Sheets API auth
-  const auth = new google.auth.GoogleAuth({
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-  });
-  const sheets = google.sheets({ version: 'v4', auth });
+  const sheetUrl = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${encodeURIComponent(
+    SHEET_NAME
+  )}?key=${API_KEY}`;
 
-  // ✅ Your Sheet and range
-  const spreadsheetId = '11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs'; // ✅ Customer Registration Sheet ID
-  const range = 'Customer Registration (Responses)!A1:Z1000';
+  try {
+    const response = await fetch(sheetUrl);
+    const data = await response.json();
+    const rows = data.values;
 
-  // ✅ Load sheet rows
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range,
-  });
+    const headers = rows[0];
+    const hiveIdIndex = headers.indexOf("Hive ID");
+    const apiaryIndex = headers.indexOf("Apiary Name");
+    const latIndex = headers.indexOf("Latitude");
+    const lonIndex = headers.indexOf("Longitude");
+    const weatherIndex = headers.indexOf("Weather");
 
-  const rows = response.data.values;
-  if (!rows || rows.length === 0) {
-    return {
-      statusCode: 404,
-      body: 'No data found in the sheet.',
-    };
-  }
+    const hiveRow = rows.find((row, i) => i > 0 && row[hiveIdIndex] === hive_id);
 
-  const headers = rows[0];
-  const hiveIdIndex = headers.indexOf('Hive ID');
-  const latIndex = headers.indexOf('Latitude');
-  const lonIndex = headers.indexOf('Longitude');
+    if (!hiveRow) {
+      const regUrl = new URL("https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform");
+      regUrl.searchParams.set("entry.432611212", hive_id);
+      if (lat) regUrl.searchParams.set("lat", lat);
+      if (lon) regUrl.searchParams.set("lon", lon);
 
-  // 🔍 Find matching hive
-  const match = rows.slice(1).find((row) => {
-    const rowHiveId = row[hiveIdIndex];
-    const rowLat = parseFloat(row[latIndex]);
-    const rowLon = parseFloat(row[lonIndex]);
+      return {
+        statusCode: 302,
+        headers: {
+          Location: regUrl.toString(),
+        },
+      };
+    }
 
-    if (!rowHiveId || isNaN(rowLat) || isNaN(rowLon)) return false;
+    const apiary = hiveRow[apiaryIndex] || "";
+    const savedLat = hiveRow[latIndex] || lat || "";
+    const savedLon = hiveRow[lonIndex] || lon || "";
+    const weather = hiveRow[weatherIndex] || "Unknown";
 
-    const distance = haversineDistance(lat, lon, rowLat, rowLon);
-    return rowHiveId === hiveId || distance < 0.1; // match by ID or within 100m
-  });
-
-  if (match) {
-    // ✅ Redirect to INSPECTION FORM
-    const inspectionFormURL = 'https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url';
-
-    const redirectURL = `${inspectionFormURL}` +
-      `&entry.432611212=${encodeURIComponent(hiveId)}` + // Hive ID
-      `&entry.275862362=${encodeURIComponent(match[headers.indexOf('Apiary Name')] || '')}` + // Apiary
-      `&entry.2060880531=${encodeURIComponent(match[headers.indexOf('Weather')] || 'Unknown')}`; // Weather
+    const inspectUrl = new URL("https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform");
+    inspectUrl.searchParams.set("entry.432611212", hive_id);
+    inspectUrl.searchParams.set("entry.275862362", apiary);
+    inspectUrl.searchParams.set("entry.2060880531", weather);
+    if (savedLat) inspectUrl.searchParams.set("lat", savedLat);
+    if (savedLon) inspectUrl.searchParams.set("lon", savedLon);
 
     return {
       statusCode: 302,
       headers: {
-        Location: redirectURL,
+        Location: inspectUrl.toString(),
       },
     };
-  } else {
-    // ❌ Not found → redirect to REGISTRATION FORM
-    const registrationFormURL = 'https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url';
-
-    const redirectURL = `${registrationFormURL}` +
-      `&entry.432611212=${encodeURIComponent(hiveId)}` +
-      `&lat=${lat}&lon=${lon}`;
-
+  } catch (error) {
+    console.error("Error in redirect.js:", error);
     return {
-      statusCode: 302,
-      headers: {
-        Location: redirectURL,
-      },
+      statusCode: 500,
+      body: "Internal Server Error",
     };
   }
 };
-
-// 📍 Calculate haversine distance in km
-function haversineDistance(lat1, lon1, lat2, lon2) {
-  const toRad = (value) => value * Math.PI / 180;
-  const R = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-            Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
