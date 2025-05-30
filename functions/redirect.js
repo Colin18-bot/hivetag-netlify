@@ -3,33 +3,29 @@ const { google } = require("googleapis");
 exports.handler = async function (event, context) {
   try {
     const { lat, lon } = event.queryStringParameters;
-
     if (!lat || !lon) {
-      return {
-        statusCode: 400,
-        body: "Missing lat or lon",
-      };
+      return { statusCode: 400, body: "Missing lat or lon" };
     }
 
-    // 🌦️ Step 1: Fetch weather data
     const weatherRes = await fetch(`https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`);
     const weatherData = await weatherRes.json();
-
     if (!weatherData || !weatherData.current || !weatherData.current.condition) {
-      return {
-        statusCode: 500,
-        body: "Weather lookup failed",
-      };
+      return { statusCode: 500, body: "Weather lookup failed" };
     }
-
     const weather = weatherData.current.condition.text;
 
-    // 📊 Step 2: Load Google Sheet and locate nearest hive
     const sheets = google.sheets({ version: "v4", auth: process.env.GOOGLE_API_KEY });
     const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
     const range = "Form Responses 1";
     const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
     const rows = response.data.values;
+
+    const registrationFormUrl = "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url";
+    const inspectionFormUrlBase = "https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url";
+
+    if (!rows || rows.length < 2) {
+      return { statusCode: 302, headers: { Location: registrationFormUrl } };
+    }
 
     const headers = rows[0];
     const dataRows = rows.slice(1);
@@ -39,30 +35,13 @@ exports.handler = async function (event, context) {
     const hiveIdIndex = headers.indexOf("Hive ID");
     const apiaryIndex = headers.indexOf("Apiary Name");
 
-    if (latIndex === -1 || lonIndex === -1 || hiveIdIndex === -1 || apiaryIndex === -1) {
-      return { statusCode: 500, body: "Missing expected columns" };
-    }
-
-    // Check if any registered hive has coordinates
-    const hasGPS = dataRows.some(row => row[latIndex] && row[lonIndex]);
-    if (!hasGPS) {
-      const registrationFormUrl = "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url";
-      return {
-        statusCode: 302,
-        headers: {
-          Location: registrationFormUrl,
-        },
-      };
-    }
-
-    // Calculate distance to all known hives
     const toRadians = (deg) => (deg * Math.PI) / 180;
     const distanceMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371000;
       const dLat = toRadians(lat2 - lat1);
       const dLon = toRadians(lon2 - lon1);
       const a = Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2;
+                Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2;
       return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
     };
 
@@ -82,32 +61,17 @@ exports.handler = async function (event, context) {
     }
 
     if (!closest) {
-      const registrationFormUrl = "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url";
-      return {
-        statusCode: 302,
-        headers: {
-          Location: registrationFormUrl,
-        },
-      };
+      return { statusCode: 302, headers: { Location: registrationFormUrl } };
     }
 
     const hiveId = closest[hiveIdIndex];
     const apiary = closest[apiaryIndex];
 
-    const inspectionFormUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(hiveId)}&entry.275862362=${encodeURIComponent(apiary)}&entry.2060880531=${encodeURIComponent(weather)}`;
-
-    return {
-      statusCode: 302,
-      headers: {
-        Location: inspectionFormUrl,
-      },
-    };
+    const inspectionFormUrl = `${inspectionFormUrlBase}&entry.432611212=${encodeURIComponent(hiveId)}&entry.275862362=${encodeURIComponent(apiary)}&entry.2060880531=${encodeURIComponent(weather)}`;
+    return { statusCode: 302, headers: { Location: inspectionFormUrl } };
 
   } catch (error) {
     console.error("Redirect error:", error);
-    return {
-      statusCode: 500,
-      body: "Server error",
-    };
+    return { statusCode: 500, body: "Server error" };
   }
 };
