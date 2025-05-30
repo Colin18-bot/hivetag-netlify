@@ -9,7 +9,9 @@ exports.handler = async function (event, context) {
     }
 
     // 🌦️ Step 1: Fetch weather
-    const weatherRes = await fetch(`https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`);
+    const weatherRes = await fetch(
+      `https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`
+    );
     const weatherData = await weatherRes.json();
 
     if (!weatherData?.current?.condition?.text) {
@@ -33,35 +35,51 @@ exports.handler = async function (event, context) {
     const hiveIdIndex = headers.indexOf("Hive ID");
     const apiaryIndex = headers.indexOf("Apiary Name");
 
+    // 🚨 Missing critical columns
     if ([latIndex, lonIndex, hiveIdIndex, apiaryIndex].includes(-1)) {
-      return { statusCode: 500, body: "Missing expected columns" };
-    }
-
-    // 🧪 Check for at least one row with valid GPS
-    const gpsRows = dataRows.filter((r) => {
-      const rowLat = parseFloat(r[latIndex]);
-      const rowLon = parseFloat(r[lonIndex]);
-      return !isNaN(rowLat) && !isNaN(rowLon);
-    });
-
-    if (gpsRows.length === 0) {
-      // 🆕 First-time use — go to registration
       return {
-        statusCode: 302,
-        headers: {
-          Location: "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url",
-        },
+        statusCode: 500,
+        body: "Missing expected columns (Latitude, Longitude, Hive ID, or Apiary Name)"
       };
     }
 
-    // 📍 Find closest match
+    // 🧪 No data or only header row
+    if (!dataRows.length) {
+      return {
+        statusCode: 302,
+        headers: {
+          Location: "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url"
+        }
+      };
+    }
+
+    // 🧭 Filter for rows with GPS coordinates
+    const gpsRows = dataRows.filter((row) => {
+      const rowLat = parseFloat(row[latIndex]);
+      const rowLon = parseFloat(row[lonIndex]);
+      return !isNaN(rowLat) && !isNaN(rowLon);
+    });
+
+    // ❌ No GPS coordinates stored
+    if (!gpsRows.length) {
+      return {
+        statusCode: 302,
+        headers: {
+          Location: "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url"
+        }
+      };
+    }
+
+    // 📍 Find nearest GPS match
     const toRad = (deg) => (deg * Math.PI) / 180;
     const getDist = (aLat, aLon, bLat, bLon) => {
       const R = 6371000;
       const dLat = toRad(bLat - aLat);
       const dLon = toRad(bLon - aLon);
-      const aa = Math.sin(dLat/2)**2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLon/2)**2;
-      return R * 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     };
 
     let closest = null;
@@ -79,28 +97,30 @@ exports.handler = async function (event, context) {
     }
 
     if (!closest) {
-      // 🧭 No match within 100m
       return {
         statusCode: 302,
         headers: {
-          Location: "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url",
-        },
+          Location: "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url"
+        }
       };
     }
 
-    // 🐝 Build Inspection Form URL
+    // ✅ Found match — Build inspection URL
     const hiveId = closest[hiveIdIndex];
     const apiary = closest[apiaryIndex];
 
-    const inspectionUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(hiveId)}&entry.275862362=${encodeURIComponent(apiary)}&entry.2060880531=${encodeURIComponent(weather)}`;
+    const inspectionUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(
+      hiveId
+    )}&entry.275862362=${encodeURIComponent(apiary)}&entry.2060880531=${encodeURIComponent(
+      weather
+    )}`;
 
     return {
       statusCode: 302,
       headers: {
-        Location: inspectionUrl,
-      },
+        Location: inspectionUrl
+      }
     };
-
   } catch (err) {
     console.error("Redirect error:", err);
     return { statusCode: 500, body: "Server error" };
