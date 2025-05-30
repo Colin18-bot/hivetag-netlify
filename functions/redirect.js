@@ -1,74 +1,98 @@
-const fetch = require("node-fetch");
+const { google } = require("googleapis");
 
-const GOOGLE_SHEET_ID = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
-const SHEET_NAME = "HiveTag - Customer Registration (Responses)";
-const API_KEY = process.env.GOOGLE_API_KEY;
-
-exports.handler = async (event) => {
-  const { hive_id, lat, lon } = event.queryStringParameters;
-
-  if (!hive_id) {
-    return {
-      statusCode: 400,
-      body: "Missing hive_id",
-    };
-  }
-
-  const sheetUrl = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${encodeURIComponent(
-    SHEET_NAME
-  )}?key=${API_KEY}`;
-
+exports.handler = async function (event, context) {
   try {
-    const response = await fetch(sheetUrl);
-    const data = await response.json();
-    const rows = data.values;
+    const { lat, lon } = event.queryStringParameters;
 
-    const headers = rows[0];
-    const hiveIdIndex = headers.indexOf("Hive ID");
-    const apiaryIndex = headers.indexOf("Apiary Name");
-    const latIndex = headers.indexOf("Latitude");
-    const lonIndex = headers.indexOf("Longitude");
-    const weatherIndex = headers.indexOf("Weather");
-
-    const hiveRow = rows.find((row, i) => i > 0 && row[hiveIdIndex] === hive_id);
-
-    if (!hiveRow) {
-      const regUrl = new URL("https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform");
-      regUrl.searchParams.set("entry.432611212", hive_id);
-      if (lat) regUrl.searchParams.set("lat", lat);
-      if (lon) regUrl.searchParams.set("lon", lon);
-
+    if (!lat || !lon) {
       return {
-        statusCode: 302,
-        headers: {
-          Location: regUrl.toString(),
-        },
+        statusCode: 400,
+        body: "Missing lat or lon",
       };
     }
 
-    const apiary = hiveRow[apiaryIndex] || "";
-    const savedLat = hiveRow[latIndex] || lat || "";
-    const savedLon = hiveRow[lonIndex] || lon || "";
-    const weather = hiveRow[weatherIndex] || "Unknown";
+    // 🌦️ Step 1: Fetch weather data
+    const weatherRes = await fetch(`https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`);
+    const weatherData = await weatherRes.json();
 
-    const inspectUrl = new URL("https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform");
-    inspectUrl.searchParams.set("entry.432611212", hive_id);
-    inspectUrl.searchParams.set("entry.275862362", apiary);
-    inspectUrl.searchParams.set("entry.2060880531", weather);
-    if (savedLat) inspectUrl.searchParams.set("lat", savedLat);
-    if (savedLon) inspectUrl.searchParams.set("lon", savedLon);
+    if (!weatherData || !weatherData.current || !weatherData.current.condition) {
+      return {
+        statusCode: 500,
+        body: "Weather lookup failed",
+      };
+    }
+
+    const weather = weatherData.current.condition.text;
+
+    // 📊 Step 2: Load Google Sheet and locate nearest hive
+    const sheets = google.sheets({ version: "v4", auth: process.env.GOOGLE_API_KEY });
+    const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
+    const range = "Form Responses 1";
+    const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
+    const rows = response.data.values;
+
+    if (!rows || rows.length < 2) {
+      return { statusCode: 500, body: "No data found" };
+    }
+
+    const headers = rows[0];
+    const dataRows = rows.slice(1);
+
+    const latIndex = headers.indexOf("Latitude");
+    const lonIndex = headers.indexOf("Longitude");
+    const hiveIdIndex = headers.indexOf("Hive ID");
+    const apiaryIndex = headers.indexOf("Apiary Name");
+
+    if (latIndex === -1 || lonIndex === -1 || hiveIdIndex === -1 || apiaryIndex === -1) {
+      return { statusCode: 500, body: "Missing expected columns" };
+    }
+
+    const toRadians = (deg) => (deg * Math.PI) / 180;
+    const distanceMeters = (lat1, lon1, lat2, lon2) => {
+      const R = 6371000;
+      const dLat = toRadians(lat2 - lat1);
+      const dLon = toRadians(lon2 - lon1);
+      const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2;
+      return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+    };
+
+    let closest = null;
+    let closestDistance = 100;
+
+    for (const row of dataRows) {
+      const rowLat = parseFloat(row[latIndex]);
+      const rowLon = parseFloat(row[lonIndex]);
+      if (isNaN(rowLat) || isNaN(rowLon)) continue;
+
+      const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
+      if (d < closestDistance) {
+        closestDistance = d;
+        closest = row;
+      }
+    }
+
+    if (!closest) {
+      return { statusCode: 404, body: "No hive matched within 100m" };
+    }
+
+    const hiveId = closest[hiveIdIndex];
+    const apiary = closest[apiaryIndex];
+
+    const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(hiveId)}&entry.275862362=${encodeURIComponent(apiary)}&entry.2060880531=${encodeURIComponent(weather)}`;
 
     return {
       statusCode: 302,
       headers: {
-        Location: inspectUrl.toString(),
+        Location: formUrl,
       },
     };
+
   } catch (error) {
-    console.error("Error in redirect.js:", error);
+    console.error("Redirect error:", error);
     return {
       statusCode: 500,
-      body: "Internal Server Error",
+      body: "Server error",
     };
   }
 };
