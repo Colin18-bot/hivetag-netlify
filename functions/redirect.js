@@ -32,7 +32,14 @@ exports.handler = async function (event, context) {
     const rows = response.data.values;
 
     if (!rows || rows.length < 2) {
-      return { statusCode: 500, body: "No data found" };
+      // 👤 No hives registered yet — first-time setup fallback
+      const registrationFormUrl = "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url";
+      return {
+        statusCode: 302,
+        headers: {
+          Location: registrationFormUrl,
+        },
+      };
     }
 
     const headers = rows[0];
@@ -73,7 +80,14 @@ exports.handler = async function (event, context) {
     }
 
     if (!closest) {
-      return { statusCode: 404, body: "No hive matched within 100m" };
+      // 📭 No hive found within 100m — fallback to registration form
+      const registrationFormUrl = "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url";
+      return {
+        statusCode: 302,
+        headers: {
+          Location: registrationFormUrl,
+        },
+      };
     }
 
     const hiveId = closest[hiveIdIndex];
