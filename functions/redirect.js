@@ -43,8 +43,12 @@ exports.handler = async function (event, context) {
       };
     }
 
-    // 🧪 No data or only header row
-    if (!dataRows.length) {
+    // ⚠️ Check for any real data (not just blank rows)
+    const hasRealData = dataRows.some((row) =>
+      row.some((cell) => cell && cell.trim() !== "")
+    );
+
+    if (!hasRealData) {
       return {
         statusCode: 302,
         headers: {
@@ -53,7 +57,7 @@ exports.handler = async function (event, context) {
       };
     }
 
-    // 🧭 Filter for rows with GPS coordinates
+    // 🗭 Filter for rows with GPS coordinates
     const gpsRows = dataRows.filter((row) => {
       const rowLat = parseFloat(row[latIndex]);
       const rowLon = parseFloat(row[lonIndex]);
