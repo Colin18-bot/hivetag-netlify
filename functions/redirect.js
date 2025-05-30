@@ -1,98 +1,100 @@
-const { google } = require("googleapis");
+const { google } = require('googleapis');
+const fetch = require('node-fetch');
 
-exports.handler = async function (event, context) {
-  try {
-    const { lat, lon } = event.queryStringParameters;
+// MAIN HANDLER FUNCTION
+exports.handler = async (event) => {
+  const hiveId = event.queryStringParameters.hive_id;
+  const lat = parseFloat(event.queryStringParameters.lat);
+  const lon = parseFloat(event.queryStringParameters.lon);
 
-    if (!lat || !lon) {
-      return {
-        statusCode: 400,
-        body: "Missing lat or lon",
-      };
-    }
-
-    // 🌦️ Step 1: Fetch weather data
-    const weatherRes = await fetch(`https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`);
-    const weatherData = await weatherRes.json();
-
-    if (!weatherData || !weatherData.current || !weatherData.current.condition) {
-      return {
-        statusCode: 500,
-        body: "Weather lookup failed",
-      };
-    }
-
-    const weather = weatherData.current.condition.text;
-
-    // 📊 Step 2: Load Google Sheet and locate nearest hive
-    const sheets = google.sheets({ version: "v4", auth: process.env.GOOGLE_API_KEY });
-    const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
-    const range = "Form Responses 1";
-    const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
-    const rows = response.data.values;
-
-    if (!rows || rows.length < 2) {
-      return { statusCode: 500, body: "No data found" };
-    }
-
-    const headers = rows[0];
-    const dataRows = rows.slice(1);
-
-    const latIndex = headers.indexOf("Latitude");
-    const lonIndex = headers.indexOf("Longitude");
-    const hiveIdIndex = headers.indexOf("Hive ID");
-    const apiaryIndex = headers.indexOf("Apiary Name");
-
-    if (latIndex === -1 || lonIndex === -1 || hiveIdIndex === -1 || apiaryIndex === -1) {
-      return { statusCode: 500, body: "Missing expected columns" };
-    }
-
-    const toRadians = (deg) => (deg * Math.PI) / 180;
-    const distanceMeters = (lat1, lon1, lat2, lon2) => {
-      const R = 6371000;
-      const dLat = toRadians(lat2 - lat1);
-      const dLon = toRadians(lon2 - lon1);
-      const a = Math.sin(dLat / 2) ** 2 +
-                Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2;
-      return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+  if (!hiveId || isNaN(lat) || isNaN(lon)) {
+    return {
+      statusCode: 400,
+      body: 'Missing hive_id, lat, or lon',
     };
+  }
 
-    let closest = null;
-    let closestDistance = 100;
+  // ✅ Google Sheets API auth
+  const auth = new google.auth.GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+  });
+  const sheets = google.sheets({ version: 'v4', auth });
 
-    for (const row of dataRows) {
-      const rowLat = parseFloat(row[latIndex]);
-      const rowLon = parseFloat(row[lonIndex]);
-      if (isNaN(rowLat) || isNaN(rowLon)) continue;
+  // ✅ Your Sheet and range
+  const spreadsheetId = '11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs'; // ✅ Customer Registration Sheet ID
+  const range = 'Customer Registration (Responses)!A1:Z1000';
 
-      const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
-      if (d < closestDistance) {
-        closestDistance = d;
-        closest = row;
-      }
-    }
+  // ✅ Load sheet rows
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range,
+  });
 
-    if (!closest) {
-      return { statusCode: 404, body: "No hive matched within 100m" };
-    }
+  const rows = response.data.values;
+  if (!rows || rows.length === 0) {
+    return {
+      statusCode: 404,
+      body: 'No data found in the sheet.',
+    };
+  }
 
-    const hiveId = closest[hiveIdIndex];
-    const apiary = closest[apiaryIndex];
+  const headers = rows[0];
+  const hiveIdIndex = headers.indexOf('Hive ID');
+  const latIndex = headers.indexOf('Latitude');
+  const lonIndex = headers.indexOf('Longitude');
 
-    const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(hiveId)}&entry.275862362=${encodeURIComponent(apiary)}&entry.2060880531=${encodeURIComponent(weather)}`;
+  // 🔍 Find matching hive
+  const match = rows.slice(1).find((row) => {
+    const rowHiveId = row[hiveIdIndex];
+    const rowLat = parseFloat(row[latIndex]);
+    const rowLon = parseFloat(row[lonIndex]);
+
+    if (!rowHiveId || isNaN(rowLat) || isNaN(rowLon)) return false;
+
+    const distance = haversineDistance(lat, lon, rowLat, rowLon);
+    return rowHiveId === hiveId || distance < 0.1; // match by ID or within 100m
+  });
+
+  if (match) {
+    // ✅ Redirect to INSPECTION FORM
+    const inspectionFormURL = 'https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url';
+
+    const redirectURL = `${inspectionFormURL}` +
+      `&entry.432611212=${encodeURIComponent(hiveId)}` + // Hive ID
+      `&entry.275862362=${encodeURIComponent(match[headers.indexOf('Apiary Name')] || '')}` + // Apiary
+      `&entry.2060880531=${encodeURIComponent(match[headers.indexOf('Weather')] || 'Unknown')}`; // Weather
 
     return {
       statusCode: 302,
       headers: {
-        Location: formUrl,
+        Location: redirectURL,
       },
     };
+  } else {
+    // ❌ Not found → redirect to REGISTRATION FORM
+    const registrationFormURL = 'https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url';
 
-  } catch (error) {
-    console.error("Redirect error:", error);
+    const redirectURL = `${registrationFormURL}` +
+      `&entry.432611212=${encodeURIComponent(hiveId)}` +
+      `&lat=${lat}&lon=${lon}`;
+
     return {
-      statusCode: 500,
-      body: "Server error",
+      statusCode: 302,
+      headers: {
+        Location: redirectURL,
+      },
     };
   }
 };
+
+// 📍 Calculate haversine distance in km
+function haversineDistance(lat1, lon1, lat2, lon2) {
+  const toRad = (value) => value * Math.PI / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+            Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
