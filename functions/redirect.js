@@ -29,7 +29,6 @@ exports.handler = async function (event, context) {
     const rows = response.data.values;
 
     if (!rows || rows.length < 2) {
-      // Spreadsheet empty — first time
       return {
         statusCode: 302,
         headers: {
@@ -39,7 +38,18 @@ exports.handler = async function (event, context) {
     }
 
     const headers = rows[0];
-    const dataRows = rows.slice(1);
+    const dataRows = rows.slice(1).filter(row => row.some(cell => cell.trim() !== ""));
+
+    if (dataRows.length === 0) {
+      // 📭 No usable hive data — fallback to registration
+      return {
+        statusCode: 302,
+        headers: {
+          Location: "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url",
+        },
+      };
+    }
+
     const latIndex = headers.indexOf("Latitude");
     const lonIndex = headers.indexOf("Longitude");
     const hiveIdIndex = headers.indexOf("Hive ID");
@@ -62,14 +72,10 @@ exports.handler = async function (event, context) {
     let closest = null;
     let closestDistance = 100;
 
-    let validGPSFound = false;
-
     for (const row of dataRows) {
       const rowLat = parseFloat(row[latIndex]);
       const rowLon = parseFloat(row[lonIndex]);
       if (isNaN(rowLat) || isNaN(rowLon)) continue;
-
-      validGPSFound = true;
 
       const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
       if (d < closestDistance) {
@@ -78,8 +84,8 @@ exports.handler = async function (event, context) {
       }
     }
 
-    if (!validGPSFound || !closest) {
-      // 🆕 No GPS saved yet or no hive within 100m
+    if (!closest) {
+      // 📭 No hive found within 100m — fallback to registration form
       return {
         statusCode: 302,
         headers: {
