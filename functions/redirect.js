@@ -31,8 +31,8 @@ exports.handler = async function (event, context) {
     const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
     const rows = response.data.values;
 
-    if (!rows || rows.length < 2) {
-      // 👤 No hives registered yet — first-time setup fallback
+    // ✅ Fix: Handle empty or header-only sheets
+    if (!rows || rows.length === 0 || (rows.length === 1 && rows[0].length > 0)) {
       const registrationFormUrl = "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url";
       return {
         statusCode: 302,
@@ -79,8 +79,8 @@ exports.handler = async function (event, context) {
       }
     }
 
+    // 🚪Fallback to registration form if no hive found nearby
     if (!closest) {
-      // 📭 No hive found within 100m — fallback to registration form
       const registrationFormUrl = "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url";
       return {
         statusCode: 302,
