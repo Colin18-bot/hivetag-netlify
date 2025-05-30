@@ -11,7 +11,7 @@ exports.handler = async function (event, context) {
       };
     }
 
-    // 🌦️ Step 1: Fetch weather
+    // 🌦️ Step 1: Get weather
     const weatherRes = await fetch(`https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`);
     const weatherData = await weatherRes.json();
 
@@ -21,35 +21,27 @@ exports.handler = async function (event, context) {
 
     const weather = weatherData.current.condition.text;
 
-    // 📊 Step 2: Read spreadsheet
+    // 📊 Step 2: Get spreadsheet data
     const sheets = google.sheets({ version: "v4", auth: process.env.GOOGLE_API_KEY });
     const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
     const range = "Form Responses 1";
     const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
     const rows = response.data.values;
 
-    if (!rows || rows.length < 2) {
+    const registrationFormUrl = "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url";
+
+    if (!rows || rows.length < 2 || rows.slice(1).every(row => row.every(cell => !cell))) {
+      // ✅ Spreadsheet is empty of actual content
       return {
         statusCode: 302,
         headers: {
-          Location: "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url",
+          Location: registrationFormUrl,
         },
       };
     }
 
     const headers = rows[0];
-    const dataRows = rows.slice(1).filter(row => row.some(cell => cell.trim() !== ""));
-
-    if (dataRows.length === 0) {
-      // 📭 No usable hive data — fallback to registration
-      return {
-        statusCode: 302,
-        headers: {
-          Location: "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url",
-        },
-      };
-    }
-
+    const dataRows = rows.slice(1);
     const latIndex = headers.indexOf("Latitude");
     const lonIndex = headers.indexOf("Longitude");
     const hiveIdIndex = headers.indexOf("Hive ID");
@@ -72,10 +64,14 @@ exports.handler = async function (event, context) {
     let closest = null;
     let closestDistance = 100;
 
+    let validGPSFound = false;
+
     for (const row of dataRows) {
       const rowLat = parseFloat(row[latIndex]);
       const rowLon = parseFloat(row[lonIndex]);
       if (isNaN(rowLat) || isNaN(rowLon)) continue;
+
+      validGPSFound = true;
 
       const d = distanceMeters(parseFloat(lat), parseFloat(lon), rowLat, rowLon);
       if (d < closestDistance) {
@@ -84,12 +80,12 @@ exports.handler = async function (event, context) {
       }
     }
 
-    if (!closest) {
-      // 📭 No hive found within 100m — fallback to registration form
+    if (!validGPSFound || !closest) {
+      // 📭 No GPS saved or no hive within range — fallback
       return {
         statusCode: 302,
         headers: {
-          Location: "https://docs.google.com/forms/d/e/1FAIpQLSejvAZD9WekBezk3Z6Z8Tt7Uedy5Irfjl4JLUZgIdw68nQBeA/viewform?usp=pp_url",
+          Location: registrationFormUrl,
         },
       };
     }
