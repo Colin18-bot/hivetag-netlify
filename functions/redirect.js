@@ -1,5 +1,3 @@
-// Force redeploy - no logic changed
-
 const { google } = require("googleapis");
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
@@ -7,6 +5,7 @@ exports.handler = async function (event, context) {
   try {
     const { lat, lon } = event.queryStringParameters;
 
+    console.log("Received lat/lon:", lat, lon);
     if (!lat || !lon) {
       return {
         statusCode: 400,
@@ -15,10 +14,12 @@ exports.handler = async function (event, context) {
     }
 
     const sheets = google.sheets({ version: "v4", auth: process.env.GOOGLE_API_KEY });
-    const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs"; // Customer Registration Sheet
+    const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
     const range = "Customer Registration Responses";
     const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
+
     const rows = response.data.values;
+    console.log("Fetched rows:", rows?.length || 0);
 
     if (!rows || rows.length < 2) {
       return { statusCode: 500, body: "No data found" };
@@ -31,6 +32,8 @@ exports.handler = async function (event, context) {
     const lonIndex = headers.indexOf("Longitude");
     const hiveIdIndex = headers.indexOf("Hive ID");
     const apiaryIndex = headers.indexOf("Apiary Name");
+
+    console.log("Column indexes:", { latIndex, lonIndex, hiveIdIndex, apiaryIndex });
 
     if ([latIndex, lonIndex, hiveIdIndex, apiaryIndex].includes(-1)) {
       return { statusCode: 500, body: "Missing expected columns" };
@@ -71,18 +74,21 @@ exports.handler = async function (event, context) {
     const hiveId = closest[hiveIdIndex];
     const apiary = closest[apiaryIndex];
 
-    // Lookup weather
+    console.log("Matched hive:", { hiveId, apiary });
+
     let weather = "Unknown";
     try {
       const weatherRes = await fetch(
         `https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${lat},${lon}`
       );
       const weatherData = await weatherRes.json();
+      console.log("Weather response:", weatherData);
+
       if (weatherData?.current?.condition?.text) {
         weather = weatherData.current.condition.text;
       }
     } catch (err) {
-      console.error("Weather API failed", err.message);
+      console.error("Weather API error:", err.message);
     }
 
     const formUrl = `https://docs.google.com/forms/d/e/1FAIpQLSdVdBrqwRRiPI0phriZLS1eWyaEIIk96wGBemvmvjF7NfMqYg/viewform?usp=pp_url&entry.432611212=${encodeURIComponent(
@@ -90,6 +96,8 @@ exports.handler = async function (event, context) {
     )}&entry.275862362=${encodeURIComponent(
       apiary
     )}&entry.2060880531=${encodeURIComponent(weather)}`;
+
+    console.log("Redirecting to:", formUrl);
 
     return {
       statusCode: 302,
