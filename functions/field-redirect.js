@@ -20,7 +20,8 @@ exports.handler = async function (event, context) {
 
     const sheets = google.sheets({ version: "v4", auth: process.env.GOOGLE_API_KEY });
     const spreadsheetId = "11nPXg_sx88U8tScpT2-iqmeRGN_jvqnBxs_twqaenJs";
-    const range = "Form Responses 1";
+    const range = "Customer Registration Responses"; // ✅ Updated sheet name
+
     const response = await sheets.spreadsheets.values.get({ spreadsheetId, range });
     const rows = response.data.values;
 
@@ -90,7 +91,7 @@ exports.handler = async function (event, context) {
       const isMissingGPS = !recordedLat || !recordedLon || isNaN(recordedLat) || isNaN(recordedLon);
 
       if (isMissingGPS && closestRowIndex !== -1) {
-        const updateRange = `Form Responses 1!${String.fromCharCode(65 + latIndex)}${closestRowIndex + 1}:${String.fromCharCode(65 + lonIndex)}${closestRowIndex + 1}`;
+        const updateRange = `Customer Registration Responses!${String.fromCharCode(65 + latIndex)}${closestRowIndex + 1}:${String.fromCharCode(65 + lonIndex)}${closestRowIndex + 1}`;
         await sheets.spreadsheets.values.update({
           spreadsheetId,
           range: updateRange,
